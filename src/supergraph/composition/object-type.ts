@@ -435,7 +435,7 @@ export function objectTypeBuilder(): TypeBuilder<ObjectType, ObjectTypeState> {
             }
 
             if (!isQuery && field.byGraph.size === 1) {
-              const graphId = field.byGraph.keys().next().value;
+              const graphId = field.byGraph.keys().next().value!;
               const fieldInGraph = field.byGraph.get(graphId)!;
 
               if (
