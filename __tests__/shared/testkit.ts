@@ -24,7 +24,6 @@ const missingErrorCodes = [
   'EXTERNAL_COLLISION_WITH_ANOTHER_DIRECTIVE',
   'IMPLEMENTED_BY_INACCESSIBLE',
   'INVALID_FEDERATION_SUPERGRAPH',
-  'LINK_IMPORT_NAME_MISMATCH',
   'SHAREABLE_HAS_MISMATCHED_RUNTIME_TYPES',
   'UNSUPPORTED_FEATURE',
   'UNSUPPORTED_LINKED_FEATURE',
@@ -87,7 +86,31 @@ const both = [
     composeServices: composeServicesFactory(guildComposeServices),
   },
 ];
-export const versions = ['v2.0', 'v2.1', 'v2.2', 'v2.3', 'v2.4', 'v2.5', 'v2.6'] as const;
+export const versions = [
+  'v2.0',
+  'v2.1',
+  'v2.2',
+  'v2.3',
+  'v2.4',
+  'v2.5',
+  'v2.6',
+  // 'v2.7',
+  // 'v2.8',
+  'v2.9',
+] as const;
+
+export const federationVersionToJoinSpecVersion: Record<FederationVersion, string> = {
+  'v2.0': 'v0.3',
+  'v2.1': 'v0.3',
+  'v2.2': 'v0.3',
+  'v2.3': 'v0.3',
+  'v2.4': 'v0.3',
+  'v2.5': 'v0.3',
+  'v2.6': 'v0.3',
+  // 'v2.7': 'v0.4',
+  // 'v2.8': 'v0.5',
+  'v2.9': 'v0.5',
+};
 
 type TestAPI = (typeof both)[number];
 

@@ -1,6 +1,13 @@
 import { DirectiveNode } from 'graphql';
 import { FederationVersion } from '../../specifications/federation.js';
-import { ArgumentKind, Deprecated, Description, InterfaceType } from '../../subgraph/state.js';
+import {
+  ArgumentKind,
+  Deprecated,
+  Description,
+  InterfaceType,
+  ListSize,
+} from '../../subgraph/state.js';
+import { ensureValue, mathMax, mathMaxNullable, nullableArrayUnion } from '../../utils/helpers.js';
 import { createInterfaceTypeNode, JoinFieldAST } from './ast.js';
 import { convertToConst } from './common.js';
 import type { Key, MapByGraph, TypeBuilder } from './common.js';
@@ -93,6 +100,31 @@ export function interfaceTypeBuilder(): TypeBuilder<InterfaceType, InterfaceType
           fieldState.scopes.push(...field.scopes);
         }
 
+        if (field.cost !== null) {
+          fieldState.cost = mathMax(field.cost, fieldState.cost);
+        }
+
+        if (field.listSize !== null) {
+          fieldState.listSize = {
+            assumedSize: mathMaxNullable(
+              fieldState.listSize?.assumedSize,
+              field.listSize.assumedSize,
+            ),
+            // prefer `false`
+            requireOneSlicingArgument:
+              (fieldState.listSize?.requireOneSlicingArgument ?? true) &&
+              field.listSize.requireOneSlicingArgument,
+            slicingArguments: nullableArrayUnion(
+              fieldState.listSize?.slicingArguments,
+              field.listSize.slicingArguments,
+            ),
+            sizedFields: nullableArrayUnion(
+              fieldState.listSize?.sizedFields,
+              field.listSize.sizedFields,
+            ),
+          };
+        }
+
         // First deprecation wins
         if (field.deprecated && !fieldState.deprecated) {
           fieldState.deprecated = field.deprecated;
@@ -146,6 +178,10 @@ export function interfaceTypeBuilder(): TypeBuilder<InterfaceType, InterfaceType
             argState.defaultValue = arg.defaultValue;
           }
 
+          if (arg.cost !== null) {
+            argState.cost = mathMax(arg.cost, argState.cost);
+          }
+
           arg.ast.directives.forEach(directive => {
             argState.ast.directives.push(directive);
           });
@@ -161,7 +197,7 @@ export function interfaceTypeBuilder(): TypeBuilder<InterfaceType, InterfaceType
         }
       }
     },
-    composeSupergraphNode(interfaceType, graphs) {
+    composeSupergraphNode(interfaceType, graphs, { supergraphState }) {
       return createInterfaceTypeNode({
         name: interfaceType.name,
         fields: Array.from(interfaceType.fields.values()).map(field => {
@@ -199,6 +235,26 @@ export function interfaceTypeBuilder(): TypeBuilder<InterfaceType, InterfaceType
             authenticated: field.authenticated,
             policies: field.policies,
             scopes: field.scopes,
+            cost:
+              field.cost !== null
+                ? {
+                    cost: field.cost,
+                    directiveName: ensureValue(
+                      supergraphState.specs.cost.names.cost,
+                      'Directive name of @cost is not defined',
+                    ),
+                  }
+                : null,
+            listSize:
+              field.listSize !== null
+                ? {
+                    ...field.listSize,
+                    directiveName: ensureValue(
+                      supergraphState.specs.cost.names.listSize,
+                      'Directive name of @listSize is not defined',
+                    ),
+                  }
+                : null,
             tags: Array.from(field.tags),
             deprecated: field.deprecated,
             description: field.description,
@@ -220,6 +276,16 @@ export function interfaceTypeBuilder(): TypeBuilder<InterfaceType, InterfaceType
                   type: arg.type,
                   kind: arg.kind,
                   tags: Array.from(arg.tags),
+                  cost:
+                    arg.cost !== null
+                      ? {
+                          cost: arg.cost,
+                          directiveName: ensureValue(
+                            supergraphState.specs.cost.names.cost,
+                            'Directive name of @cost is not defined',
+                          ),
+                        }
+                      : null,
                   defaultValue: arg.defaultValue,
                   deprecated: arg.deprecated,
                   description: arg.description,
@@ -246,7 +312,7 @@ export function interfaceTypeBuilder(): TypeBuilder<InterfaceType, InterfaceType
         join: {
           type: Array.from(interfaceType.byGraph)
             .map(([graphId, meta]) => {
-              if (meta.keys.length && graphs.get(graphId)!.version !== 'v1.0') {
+              if (meta.keys.length && graphs.get(graphId)!.federation.version !== 'v1.0') {
                 return meta.keys.map(key => ({
                   graph: graphId,
                   key: key.fields,
@@ -314,6 +380,8 @@ export type InterfaceTypeFieldState = {
   authenticated: boolean;
   policies: string[][];
   scopes: string[][];
+  cost: number | null;
+  listSize: ListSize | null;
   deprecated?: Deprecated;
   description?: Description;
   usedAsKey: boolean;
@@ -330,6 +398,7 @@ export type InterfaceTypeFieldArgState = {
   kind: ArgumentKind;
   tags: Set<string>;
   defaultValue?: string;
+  cost: number | null;
   description?: Description;
   deprecated?: Deprecated;
   byGraph: MapByGraph<ArgStateInGraph>;
@@ -418,6 +487,8 @@ function getOrCreateInterfaceField(
     authenticated: false,
     policies: [],
     scopes: [],
+    cost: null,
+    listSize: null,
     byGraph: new Map(),
     args: new Map(),
     ast: {
@@ -447,6 +518,7 @@ function getOrCreateArg(
     type: argType,
     kind: argKind,
     tags: new Set(),
+    cost: null,
     byGraph: new Map(),
     ast: {
       directives: [],

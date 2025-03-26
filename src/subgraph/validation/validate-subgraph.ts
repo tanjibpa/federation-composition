@@ -21,12 +21,14 @@ import { Link, LinkImport, parseLinkDirective } from '../../specifications/link.
 import { SubgraphStateBuilder } from '../state.js';
 import { AuthenticatedRule } from './rules/elements/authenticated.js';
 import { ComposeDirectiveRules } from './rules/elements/compose-directive.js';
+import { CostRule } from './rules/elements/cost.js';
 import { ExtendsRules } from './rules/elements/extends.js';
 import { ExternalRules } from './rules/elements/external.js';
 import { FieldSetRules } from './rules/elements/field-set.js';
 import { InaccessibleRules } from './rules/elements/inaccessible.js';
 import { InterfaceObjectRules } from './rules/elements/interface-object.js';
 import { KeyRules } from './rules/elements/key.js';
+import { ListSizeRule } from './rules/elements/list-size.js';
 import { OverrideRules } from './rules/elements/override.js';
 import { PolicyRule } from './rules/elements/policy.js';
 import { ProvidesRules } from './rules/elements/provides.js';
@@ -143,6 +145,8 @@ export function validateSubgraph(
     AuthenticatedRule,
     PolicyRule,
     RequiresScopesRule,
+    CostRule,
+    ListSizeRule,
     OverrideRules,
     ExtendsRules,
     QueryRootTypeInaccessibleRule,
@@ -281,7 +285,7 @@ const availableFeatures: Record<string, string[]> = {
   link: ['v1.0'],
   tag: ['v0.1', 'v0.2'],
   kotlin_labs: ['v0.1', 'v0.2'],
-  join: ['v0.1', 'v0.2', 'v0.3'],
+  join: ['v0.1', 'v0.2', 'v0.3', 'v0.4', 'v0.5'],
   inaccessible: ['v0.1', 'v0.2'],
   core: ['v0.1', 'v0.2'],
 };

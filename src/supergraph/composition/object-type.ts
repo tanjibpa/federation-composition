@@ -1,7 +1,19 @@
 import { DirectiveNode } from 'graphql';
 import type { FederationVersion } from '../../specifications/federation.js';
-import { ArgumentKind, Deprecated, Description, ObjectType } from '../../subgraph/state.js';
-import { isDefined } from '../../utils/helpers.js';
+import {
+  ArgumentKind,
+  Deprecated,
+  Description,
+  ListSize,
+  ObjectType,
+} from '../../subgraph/state.js';
+import {
+  ensureValue,
+  isDefined,
+  mathMax,
+  mathMaxNullable,
+  nullableArrayUnion,
+} from '../../utils/helpers.js';
 import { createObjectTypeNode, JoinFieldAST } from './ast.js';
 import type { Key, MapByGraph, TypeBuilder } from './common.js';
 import { convertToConst } from './common.js';
@@ -50,6 +62,10 @@ export function objectTypeBuilder(): TypeBuilder<ObjectType, ObjectTypeState> {
 
       if (type.scopes) {
         objectTypeState.scopes.push(...type.scopes);
+      }
+
+      if (type.cost !== null) {
+        objectTypeState.cost = mathMax(type.cost, objectTypeState.cost);
       }
 
       const isDefinition =
@@ -153,6 +169,31 @@ export function objectTypeBuilder(): TypeBuilder<ObjectType, ObjectTypeState> {
           fieldState.scopes.push(...field.scopes);
         }
 
+        if (field.cost !== null) {
+          fieldState.cost = mathMax(field.cost, fieldState.cost);
+        }
+
+        if (field.listSize !== null) {
+          fieldState.listSize = {
+            assumedSize: mathMaxNullable(
+              fieldState.listSize?.assumedSize,
+              field.listSize.assumedSize,
+            ),
+            // prefer `false`
+            requireOneSlicingArgument:
+              (fieldState.listSize?.requireOneSlicingArgument ?? true) &&
+              field.listSize.requireOneSlicingArgument,
+            slicingArguments: nullableArrayUnion(
+              fieldState.listSize?.slicingArguments,
+              field.listSize.slicingArguments,
+            ),
+            sizedFields: nullableArrayUnion(
+              fieldState.listSize?.sizedFields,
+              field.listSize.sizedFields,
+            ),
+          };
+        }
+
         // first wins BUT a graph overriding a field of an entity type (that provided the description) is an exception (it's applied at the supergraph level REF_1)
         if (field.description && !fieldState.description) {
           fieldState.description = field.description;
@@ -222,6 +263,10 @@ export function objectTypeBuilder(): TypeBuilder<ObjectType, ObjectTypeState> {
             argState.defaultValue = arg.defaultValue;
           }
 
+          if (arg.cost !== null) {
+            argState.cost = mathMax(arg.cost, argState.cost);
+          }
+
           argState.kind = arg.kind;
 
           argState.byGraph.set(graph.id, {
@@ -250,7 +295,7 @@ export function objectTypeBuilder(): TypeBuilder<ObjectType, ObjectTypeState> {
                   graph: graphId,
                   key: key.fields,
                   // To support Fed v1, we need to only apply `extension: true` when it's a type annotated with @extends (not by using `extend type` syntax, this needs to be ignored)
-                  extension: isRealExtension(meta, graphs.get(graphId)!.version),
+                  extension: isRealExtension(meta, graphs.get(graphId)!.federation.version),
                   resolvable: key.resolvable,
                 }));
               }
@@ -302,16 +347,20 @@ export function objectTypeBuilder(): TypeBuilder<ObjectType, ObjectTypeState> {
       if (objectType.isEntity) {
         for (const [_, field] of objectType.fields) {
           // Correct description if needed (REF_1)
-          if (field.description) {
-            // check if a field was overridden
-            if (field.override) {
-              for (const [_, fieldInGraph] of field.byGraph) {
-                // if a field is shareable, ignore the description (I don't know why...don't ask me)
-                if (fieldInGraph.override && !fieldInGraph.shareable) {
-                  // use description from that graph
-                  field.description = fieldInGraph.description ?? undefined;
-                }
-              }
+          if (!field.description) {
+            continue;
+          }
+
+          // check if a field was overridden
+          if (!field.override) {
+            continue;
+          }
+
+          for (const [_, fieldInGraph] of field.byGraph) {
+            // if a field is shareable, ignore the description (I don't know why...don't ask me)
+            if (fieldInGraph.override && !fieldInGraph.shareable) {
+              // use description from that graph
+              field.description = fieldInGraph.description ?? undefined;
             }
           }
         }
@@ -394,6 +443,16 @@ export function objectTypeBuilder(): TypeBuilder<ObjectType, ObjectTypeState> {
           // DirectiveNode and ConstDirectiveNode are identical (except the readonly shit...)
           directives: convertToConst(objectType.ast.directives),
         },
+        cost:
+          objectType.cost !== null
+            ? {
+                cost: objectType.cost,
+                directiveName: ensureValue(
+                  supergraphState.specs.cost.names.cost,
+                  'Directive name of @cost is not defined',
+                ),
+              }
+            : null,
         description: objectType.description,
         fields: Array.from(objectType.fields.values())
           .map(field => {
@@ -456,7 +515,7 @@ export function objectTypeBuilder(): TypeBuilder<ObjectType, ObjectTypeState> {
                   graphNameToId,
                 ) &&
                 // and it's Federation v1
-                graphs.get(graphId)!.version === 'v1.0'
+                graphs.get(graphId)!.federation.version === 'v1.0'
               ) {
                 // drop the field
                 return null;
@@ -499,7 +558,7 @@ export function objectTypeBuilder(): TypeBuilder<ObjectType, ObjectTypeState> {
                     ? fieldInGraphs.map(([graphId, meta]) => ({
                         graph: graphId,
                         provides: differencesBetweenGraphs.provides
-                          ? meta.provides ?? undefined
+                          ? (meta.provides ?? undefined)
                           : undefined,
                       }))
                     : [];
@@ -616,6 +675,26 @@ export function objectTypeBuilder(): TypeBuilder<ObjectType, ObjectTypeState> {
               tags: Array.from(field.tags),
               description: field.description,
               deprecated: field.deprecated,
+              cost:
+                field.cost !== null
+                  ? {
+                      cost: field.cost,
+                      directiveName: ensureValue(
+                        supergraphState.specs.cost.names.cost,
+                        'Directive name of @cost is not defined',
+                      ),
+                    }
+                  : null,
+              listSize:
+                field.listSize !== null
+                  ? {
+                      ...field.listSize,
+                      directiveName: ensureValue(
+                        supergraphState.specs.cost.names.listSize,
+                        'Directive name of @listSize is not defined',
+                      ),
+                    }
+                  : null,
               ast: {
                 directives: convertToConst(field.ast.directives),
               },
@@ -649,6 +728,16 @@ export function objectTypeBuilder(): TypeBuilder<ObjectType, ObjectTypeState> {
                     type: arg.type,
                     kind: arg.kind,
                     inaccessible: arg.inaccessible,
+                    cost:
+                      arg.cost !== null
+                        ? {
+                            cost: arg.cost,
+                            directiveName: ensureValue(
+                              supergraphState.specs.cost.names.cost,
+                              'Directive name of @cost is not defined',
+                            ),
+                          }
+                        : null,
                     tags: Array.from(arg.tags),
                     defaultValue: arg.defaultValue,
                     description: arg.description,
@@ -672,6 +761,26 @@ export function objectTypeBuilder(): TypeBuilder<ObjectType, ObjectTypeState> {
                   authenticated: field.authenticated,
                   policies: field.policies,
                   scopes: field.scopes,
+                  cost:
+                    field.cost !== null
+                      ? {
+                          cost: field.cost,
+                          directiveName: ensureValue(
+                            supergraphState.specs.cost.names.cost,
+                            'Directive name of @cost is not defined',
+                          ),
+                        }
+                      : null,
+                  listSize:
+                    field.listSize !== null
+                      ? {
+                          ...field.listSize,
+                          directiveName: ensureValue(
+                            supergraphState.specs.cost.names.listSize,
+                            'Directive name of @listSize is not defined',
+                          ),
+                        }
+                      : null,
                   tags: Array.from(field.tags),
                   description: field.description,
                   deprecated: field.deprecated,
@@ -696,6 +805,16 @@ export function objectTypeBuilder(): TypeBuilder<ObjectType, ObjectTypeState> {
                         type: arg.type,
                         kind: arg.kind,
                         inaccessible: false,
+                        cost:
+                          arg.cost !== null
+                            ? {
+                                cost: arg.cost,
+                                directiveName: ensureValue(
+                                  supergraphState.specs.cost.names.cost,
+                                  'Directive name of @cost is not defined',
+                                ),
+                              }
+                            : null,
                         tags: Array.from(arg.tags),
                         defaultValue: arg.defaultValue,
                         description: arg.description,
@@ -766,6 +885,7 @@ export type ObjectTypeState = {
   authenticated: boolean;
   policies: string[][];
   scopes: string[][];
+  cost: number | null;
   hasDefinition: boolean;
   byGraph: MapByGraph<ObjectTypeStateInGraph>;
   interfaces: Set<string>;
@@ -786,6 +906,8 @@ export type ObjectTypeFieldState = {
   authenticated: boolean;
   policies: string[][];
   scopes: string[][];
+  cost: number | null;
+  listSize: ListSize | null;
   usedAsKey: boolean;
   override: string | null;
   byGraph: MapByGraph<FieldStateInGraph>;
@@ -806,6 +928,7 @@ export type ObjectTypeFieldArgState = {
   kind: ArgumentKind;
   tags: Set<string>;
   inaccessible: boolean;
+  cost: number | null;
   defaultValue?: string;
   byGraph: MapByGraph<ArgStateInGraph>;
   description?: Description;
@@ -869,6 +992,7 @@ function getOrCreateObjectType(state: Map<string, ObjectTypeState>, typeName: st
     authenticated: false,
     policies: [],
     scopes: [],
+    cost: null,
     interfaces: new Set(),
     byGraph: new Map(),
     fields: new Map(),
@@ -898,6 +1022,8 @@ function getOrCreateField(objectTypeState: ObjectTypeState, fieldName: string, f
     authenticated: false,
     policies: [],
     scopes: [],
+    cost: null,
+    listSize: null,
     usedAsKey: false,
     override: null,
     byGraph: new Map(),
@@ -933,6 +1059,7 @@ function getOrCreateArg(
     kind: argKind,
     tags: new Set(),
     inaccessible: false,
+    cost: null,
     byGraph: new Map(),
     ast: {
       directives: [],
