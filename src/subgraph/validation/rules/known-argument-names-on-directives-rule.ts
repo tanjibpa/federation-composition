@@ -30,7 +30,7 @@ export function KnownArgumentNamesOnDirectivesRule(context: {
           if (!knownArgs.has(argName)) {
             context.reportError(
               new GraphQLError(
-                `Unknown argument "${argName}" on directive "@${directiveName}".`,
+                `Unknown argument phewwwwww "${argName}" on directive "@${directiveName}".`,
                 {
                   nodes: argNode,
                   extensions: {
