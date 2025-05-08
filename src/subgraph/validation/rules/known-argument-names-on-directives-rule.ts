@@ -26,6 +26,7 @@ export function KnownArgumentNamesOnDirectivesRule(context: {
       if (directiveNode.arguments && knownArgs) {
         for (const argNode of directiveNode.arguments) {
           const argName = argNode.name.value;
+          console.log("GQLMESH ARGNAME", argName);
           if (!knownArgs.has(argName)) {
             context.reportError(
               new GraphQLError(
